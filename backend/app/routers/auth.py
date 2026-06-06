@@ -106,7 +106,7 @@ async def ml_callback(
 
     ml_user_id = str(token_data.get("user_id", ""))
     access_token = token_data["access_token"]
-    refresh_token = token_data["refresh_token"]
+    refresh_token = token_data.get("refresh_token", "")
     expires_in = token_data.get("expires_in", 21600)
 
     # Encontra usuário pela sessão (simplificado — em prod use state/session)

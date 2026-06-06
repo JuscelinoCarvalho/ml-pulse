@@ -54,24 +54,10 @@ export default function Settings() {
 
       <div className="bg-white rounded-xl p-6 shadow-sm border space-y-4">
         <h2 className="font-semibold text-gray-800">Mercado Livre</h2>
-        <p className="text-sm text-gray-500">
-          Conecte sua conta de vendedor do Mercado Livre para acessar dados de vendas e métricas.
-        </p>
-
-        {user?.ml_connected ? (
-          <div className="flex items-center gap-2 text-green-600 font-medium">
-            <CheckCircle size={18} />
-            Conta conectada
-          </div>
-        ) : (
-          <button
-            onClick={handleConnectML}
-            className="flex items-center gap-2 bg-ml-yellow text-gray-900 font-semibold px-5 py-2.5 rounded-xl hover:bg-yellow-400 transition"
-          >
-            <Link2 size={18} />
-            Conectar conta ML
-          </button>
-        )}
+        <div className="flex items-center gap-2 text-green-600 font-medium">
+          <CheckCircle size={18} />
+          Integração ativa — buscas utilizam a conta oficial do sistema
+        </div>
       </div>
     </div>
   );

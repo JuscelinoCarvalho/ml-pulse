@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { Search, BarChart2, Zap } from "lucide-react";
+import { Search, BarChart2 } from "lucide-react";
 
 export default function Dashboard() {
   const cards = [
@@ -46,19 +46,6 @@ export default function Dashboard() {
         ))}
       </div>
 
-      <div className="mt-8 bg-ml-yellow/10 border border-ml-yellow/30 rounded-2xl p-5 flex items-start gap-4">
-        <Zap className="text-yellow-600 flex-shrink-0 mt-0.5" size={20} />
-        <div>
-          <p className="font-semibold text-gray-800">Conecte sua conta do Mercado Livre</p>
-          <p className="text-sm text-gray-600 mt-1">
-            Para acessar seus dados de vendas, conecte sua conta seller em{" "}
-            <Link to="/settings" className="text-ml-blue font-medium hover:underline">
-              Configurações
-            </Link>
-            .
-          </p>
-        </div>
-      </div>
     </div>
   );
 }

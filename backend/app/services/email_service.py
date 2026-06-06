@@ -31,5 +31,5 @@ async def send_otp_email(to_email: str, otp: str) -> None:
         username=settings.smtp_user or None,
         password=settings.smtp_password or None,
         use_tls=settings.smtp_tls,
-        start_tls=False,
+        start_tls=settings.smtp_port == 587,
     )

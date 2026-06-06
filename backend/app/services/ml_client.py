@@ -13,7 +13,7 @@ from app.config import settings
 from app.core.security import decrypt, encrypt
 from app.models.ml_token import MLToken
 
-ML_API_BASE = "https://api.mercadolibre.com"
+ML_API_BASE = "https://ml-proxy.juscelino-carvalho.workers.dev"
 ML_AUTH_BASE = "https://auth.mercadolivre.com.br"
 
 
@@ -108,6 +108,7 @@ def get_oauth_url(state: str) -> str:
         f"?response_type=code"
         f"&client_id={settings.ml_client_id}"
         f"&redirect_uri={settings.ml_redirect_uri}"
+        f"&scope=read%20write%20offline_access"
         f"&state={state}"
     )
 
@@ -144,20 +145,13 @@ async def refresh_access_token(refresh_token: str) -> dict:
         return r.json()
 
 
-async def get_ml_client_for_user(user_id: int, db: AsyncSession) -> MLClient | None:
-    """Retorna um MLClient com token válido para o usuário, renovando se necessário."""
-    result = await db.execute(select(MLToken).where(MLToken.user_id == user_id))
-    token_row = result.scalar_one_or_none()
-
-    if not token_row:
-        return None
-
+async def _client_from_token_row(token_row: MLToken, db: AsyncSession) -> MLClient:
+    """Retorna MLClient renovando o token se necessário."""
     now = datetime.now(UTC)
     expires = token_row.expires_at
     if expires.tzinfo is None:
         expires = expires.replace(tzinfo=UTC)
 
-    # Renova se expirar em menos de 5 minutos
     if now >= expires - timedelta(minutes=5):
         refresh_tok = decrypt(token_row.refresh_token_enc)
         new_data = await refresh_access_token(refresh_tok)
@@ -166,5 +160,22 @@ async def get_ml_client_for_user(user_id: int, db: AsyncSession) -> MLClient | N
         token_row.expires_at = datetime.now(UTC) + timedelta(seconds=new_data["expires_in"])
         await db.flush()
 
-    access_tok = decrypt(token_row.access_token_enc)
-    return MLClient(access_tok)
+    return MLClient(decrypt(token_row.access_token_enc))
+
+
+async def get_shared_ml_client(db: AsyncSession) -> MLClient | None:
+    """Retorna MLClient usando o token do sistema (conta do owner), compartilhado por todos os usuários."""
+    result = await db.execute(select(MLToken).limit(1))
+    token_row = result.scalar_one_or_none()
+    if not token_row:
+        return None
+    return await _client_from_token_row(token_row, db)
+
+
+async def get_ml_client_for_user(user_id: int, db: AsyncSession) -> MLClient | None:
+    """Retorna MLClient com token válido para um usuário específico."""
+    result = await db.execute(select(MLToken).where(MLToken.user_id == user_id))
+    token_row = result.scalar_one_or_none()
+    if not token_row:
+        return None
+    return await _client_from_token_row(token_row, db)

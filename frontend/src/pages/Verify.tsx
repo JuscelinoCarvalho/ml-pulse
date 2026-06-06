@@ -1,7 +1,9 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { auth } from "../api/client";
 import { useAuthStore } from "../store/auth";
+
+const RESEND_COOLDOWN = 60;
 
 export default function Verify() {
   const location = useLocation();
@@ -9,9 +11,18 @@ export default function Verify() {
   const [code, setCode] = useState(["", "", "", "", "", ""]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [resendCooldown, setResendCooldown] = useState(RESEND_COOLDOWN);
+  const [resendLoading, setResendLoading] = useState(false);
+  const [resendSuccess, setResendSuccess] = useState(false);
   const refs = useRef<(HTMLInputElement | null)[]>([]);
   const navigate = useNavigate();
   const { setTokens } = useAuthStore();
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = setTimeout(() => setResendCooldown((c) => c - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [resendCooldown]);
 
   const handleChange = (i: number, val: string) => {
     if (!/^\d?$/.test(val)) return;
@@ -42,6 +53,24 @@ export default function Verify() {
     }
   };
 
+  const handleResend = async () => {
+    if (resendCooldown > 0 || resendLoading) return;
+    setResendLoading(true);
+    setResendSuccess(false);
+    setError("");
+    setCode(["", "", "", "", "", ""]);
+    try {
+      await auth.requestOtp(email);
+      setResendSuccess(true);
+      setResendCooldown(RESEND_COOLDOWN);
+      refs.current[0]?.focus();
+    } catch {
+      setError("Erro ao reenviar o código. Tente novamente.");
+    } finally {
+      setResendLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-ml-dark flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8">
@@ -69,6 +98,7 @@ export default function Verify() {
           </div>
 
           {error && <p className="text-center text-red-500 text-sm">{error}</p>}
+          {resendSuccess && <p className="text-center text-green-600 text-sm">Novo código enviado!</p>}
 
           <button
             type="submit"
@@ -78,6 +108,22 @@ export default function Verify() {
             {loading ? "Verificando..." : "Entrar"}
           </button>
         </form>
+
+        <div className="text-center mt-4">
+          {resendCooldown > 0 ? (
+            <p className="text-sm text-gray-400">
+              Reenviar código em <span className="font-semibold text-gray-600">{resendCooldown}s</span>
+            </p>
+          ) : (
+            <button
+              onClick={handleResend}
+              disabled={resendLoading}
+              className="text-sm text-ml-blue hover:underline disabled:opacity-50"
+            >
+              {resendLoading ? "Reenviando..." : "Reenviar código"}
+            </button>
+          )}
+        </div>
 
         <button
           onClick={() => navigate("/login")}
