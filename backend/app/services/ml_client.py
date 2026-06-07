@@ -2,6 +2,9 @@
 Cliente assíncrono para a API do Mercado Livre.
 Documentação: https://developers.mercadolivre.com.br/pt_br/api-docs
 """
+import base64
+import hashlib
+import secrets
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -15,6 +18,7 @@ from app.models.ml_token import MLToken
 
 ML_API_BASE = "https://ml-proxy.juscelino-carvalho.workers.dev"
 ML_AUTH_BASE = "https://auth.mercadolivre.com.br"
+USER_AGENT = "ML-Pulse/1.0"
 
 
 class MLClient:
@@ -24,7 +28,10 @@ class MLClient:
         self._token = access_token
         self._http = httpx.AsyncClient(
             base_url=ML_API_BASE,
-            headers={"Authorization": f"Bearer {access_token}"},
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "User-Agent": USER_AGENT,
+            },
             timeout=30.0,
         )
 
@@ -101,8 +108,16 @@ class MLClient:
 # ─── Helpers para OAuth ──────────────────────────────────────────────────────
 
 
-def get_oauth_url(state: str) -> str:
-    """Gera URL de autorização OAuth do ML."""
+def generate_pkce() -> tuple[str, str]:
+    """Gera (code_verifier, code_challenge) para o fluxo PKCE (método S256)."""
+    verifier = secrets.token_urlsafe(64)  # 43-128 chars, alfabeto URL-safe
+    digest = hashlib.sha256(verifier.encode("ascii")).digest()
+    challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+    return verifier, challenge
+
+
+def get_oauth_url(state: str, code_challenge: str) -> str:
+    """Gera URL de autorização OAuth do ML (com PKCE)."""
     return (
         f"{ML_AUTH_BASE}/authorization"
         f"?response_type=code"
@@ -110,28 +125,30 @@ def get_oauth_url(state: str) -> str:
         f"&redirect_uri={settings.ml_redirect_uri}"
         f"&scope=read%20write%20offline_access"
         f"&state={state}"
+        f"&code_challenge={code_challenge}"
+        f"&code_challenge_method=S256"
     )
 
 
-async def exchange_code_for_token(code: str) -> dict:
-    """Troca authorization_code por access_token + refresh_token."""
-    async with httpx.AsyncClient() as client:
-        r = await client.post(
-            f"{ML_API_BASE}/oauth/token",
-            data={
-                "grant_type": "authorization_code",
-                "client_id": settings.ml_client_id,
-                "client_secret": settings.ml_client_secret,
-                "code": code,
-                "redirect_uri": settings.ml_redirect_uri,
-            },
-        )
+async def exchange_code_for_token(code: str, code_verifier: str | None = None) -> dict:
+    """Troca authorization_code por access_token + refresh_token (com PKCE)."""
+    data = {
+        "grant_type": "authorization_code",
+        "client_id": settings.ml_client_id,
+        "client_secret": settings.ml_client_secret,
+        "code": code,
+        "redirect_uri": settings.ml_redirect_uri,
+    }
+    if code_verifier:
+        data["code_verifier"] = code_verifier
+    async with httpx.AsyncClient(headers={"User-Agent": USER_AGENT}) as client:
+        r = await client.post(f"{ML_API_BASE}/oauth/token", data=data)
         r.raise_for_status()
         return r.json()
 
 
 async def refresh_access_token(refresh_token: str) -> dict:
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(headers={"User-Agent": USER_AGENT}) as client:
         r = await client.post(
             f"{ML_API_BASE}/oauth/token",
             data={
@@ -163,10 +180,21 @@ async def _client_from_token_row(token_row: MLToken, db: AsyncSession) -> MLClie
     return MLClient(decrypt(token_row.access_token_enc))
 
 
+async def get_system_token(db: AsyncSession) -> MLToken | None:
+    """Retorna o token do sistema usado nas buscas: o mais recente conectado/renovado.
+
+    Como pode haver mais de uma linha (uma por usuário que conectou), usamos o
+    `updated_at` mais novo — a conexão/renovação mais recente vence.
+    """
+    result = await db.execute(
+        select(MLToken).order_by(MLToken.updated_at.desc()).limit(1)
+    )
+    return result.scalars().first()
+
+
 async def get_shared_ml_client(db: AsyncSession) -> MLClient | None:
     """Retorna MLClient usando o token do sistema (conta do owner), compartilhado por todos os usuários."""
-    result = await db.execute(select(MLToken).limit(1))
-    token_row = result.scalar_one_or_none()
+    token_row = await get_system_token(db)
     if not token_row:
         return None
     return await _client_from_token_row(token_row, db)

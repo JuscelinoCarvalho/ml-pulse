@@ -42,6 +42,9 @@ export const auth = {
   verifyOtp: (email: string, code: string) => api.post("/auth/verify-otp", { email, code }),
   me: () => api.get("/auth/me"),
   mlConnect: () => api.get("/auth/ml/connect"),
+  mlStatus: () => api.get("/auth/ml/status"),
+  mlExchange: (code: string, state?: string | null, codeVerifier?: string | null) =>
+    api.post("/auth/ml/exchange", { code, state, code_verifier: codeVerifier }),
 };
 
 export const products = {
@@ -54,4 +57,9 @@ export const products = {
 export const sales = {
   dashboard: (days = 30) => api.get("/sales/dashboard", { params: { days } }),
   orders: (days = 7) => api.get("/sales/orders", { params: { days } }),
+};
+
+export const notifications = {
+  list: (topic?: string, limit = 50) =>
+    api.get("/notifications", { params: { topic, limit } }),
 };

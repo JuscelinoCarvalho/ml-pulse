@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.database import engine
 from app.models import Base  # noqa: F401 - importa todos os modelos
-from app.routers import auth, products, sales
+from app.routers import auth, notifications, products, sales
 
 
 @asynccontextmanager
@@ -36,6 +36,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(products.router)
 app.include_router(sales.router)
+app.include_router(notifications.router)
 
 
 @app.get("/health")
