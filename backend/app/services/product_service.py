@@ -89,13 +89,21 @@ async def search_and_analyze(
 
     all_prices: list[float] = []
     brand_counts: dict[str, int] = {}
+    kept_names: list[str] = []
     enriched = []
 
     for product, offers in zip(products, offers_per_product):
         if isinstance(offers, Exception):
             offers = []
         prices = [o["price"] for o in offers if o.get("price")]
+
+        # Ignora produtos sem ofertas ativas (entradas "fantasma" do catálogo):
+        # não entram nos resultados nem nas estatísticas.
+        if not prices:
+            continue
+
         all_prices.extend(prices)
+        kept_names.append(product.get("name", ""))
 
         brand = _attr(product, "BRAND")
         if brand:
@@ -109,8 +117,8 @@ async def search_and_analyze(
             "id": product.get("id"),
             "title": product.get("name"),
             "brand": brand,
-            "price": min(prices) if prices else 0,
-            "price_max": max(prices) if prices else 0,
+            "price": min(prices),
+            "price_max": max(prices),
             "offers_count": len(offers),
             "thumbnail": thumb,
             "permalink": f"https://www.mercadolivre.com.br/p/{product.get('id')}",
@@ -134,7 +142,7 @@ async def search_and_analyze(
             {"brand": b, "count": c}
             for b, c in sorted(brand_counts.items(), key=lambda x: -x[1])[:8]
         ],
-        "keyword_cloud": _keyword_cloud([p.get("name", "") for p in products]),
+        "keyword_cloud": _keyword_cloud(kept_names),
     }
 
     return {"query": query, "items": enriched, "summary": summary}
