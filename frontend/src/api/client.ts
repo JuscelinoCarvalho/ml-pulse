@@ -48,8 +48,8 @@ export const auth = {
 };
 
 export const products = {
-  search: (q: string, limit = 50, offset = 0) =>
-    api.get("/products/search", { params: { q, limit, offset } }),
+  search: (q: string, limit = 50, offset = 0, domain?: string) =>
+    api.get("/products/search", { params: { q, limit, offset, domain } }),
   getItem: (id: string) => api.get(`/products/item/${id}`),
   trends: () => api.get("/products/trends"),
 };

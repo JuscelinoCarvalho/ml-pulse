@@ -11,6 +11,8 @@ interface SearchResult {
     price_avg: number;
     top_brands: { brand: string; count: number }[];
     keyword_cloud: { word: string; count: number }[];
+    active_domain: { id: string; name: string | null } | null;
+    domain_options: { id: string; name: string | null }[];
   };
   items: {
     id: string;
@@ -39,17 +41,20 @@ export default function Products() {
   const [pageSize, setPageSize] = useState(50);
   const [offset, setOffset] = useState(0);
   const [activeQuery, setActiveQuery] = useState("");
+  // domínio enviado à API: undefined = autodetectar, "all" = sem filtro, ou um domain_id
+  const [domainParam, setDomainParam] = useState<string | undefined>(undefined);
 
-  const runSearch = async (q: string, lim: number, off: number) => {
+  const runSearch = async (q: string, lim: number, off: number, dom?: string) => {
     if (!q.trim()) return;
     setLoading(true);
     setError("");
     setBrandFilter(null);
     try {
-      const { data } = await products.search(q, lim, off);
+      const { data } = await products.search(q, lim, off, dom);
       setResult(data);
       setActiveQuery(q);
       setOffset(off);
+      setDomainParam(dom);
     } catch (err: any) {
       setResult(null);
       setError(
@@ -62,12 +67,16 @@ export default function Products() {
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    runSearch(query, pageSize, 0);
+    runSearch(query, pageSize, 0, undefined); // nova busca = autodetecta categoria
   };
 
   const changePageSize = (n: number) => {
     setPageSize(n);
-    runSearch(activeQuery || query, n, 0);
+    runSearch(activeQuery || query, n, 0, domainParam);
+  };
+
+  const changeDomain = (value: string) => {
+    runSearch(activeQuery || query, pageSize, 0, value);
   };
 
   // Limite de offset da busca do ML (paginação profunda é restrita)
@@ -137,6 +146,28 @@ export default function Products() {
 
       {result && !loading && (
         <>
+          {result.summary.domain_options.length > 0 && (
+            <div className="flex items-center gap-2 text-sm bg-blue-50 border border-blue-100 rounded-xl px-4 py-2.5">
+              <Tag size={15} className="text-ml-blue flex-shrink-0" />
+              <span className="text-gray-600">Categoria:</span>
+              <select
+                value={result.summary.active_domain?.id ?? "all"}
+                onChange={(e) => changeDomain(e.target.value)}
+                className="border rounded-lg px-2 py-1 text-sm font-medium text-gray-800 bg-white"
+              >
+                {result.summary.domain_options.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name || d.id}
+                  </option>
+                ))}
+                <option value="all">Todas as categorias</option>
+              </select>
+              <span className="text-xs text-gray-400">
+                (detectada automaticamente — refine se precisar)
+              </span>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {[
               { label: "Encontrados", value: result.summary.total_found.toLocaleString("pt-BR") },
@@ -242,14 +273,14 @@ export default function Products() {
                 </div>
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => runSearch(activeQuery, pageSize, Math.max(0, offset - pageSize))}
+                    onClick={() => runSearch(activeQuery, pageSize, Math.max(0, offset - pageSize), domainParam)}
                     disabled={!hasPrev || loading}
                     className="flex items-center gap-1 border rounded-lg px-3 py-1.5 text-sm hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     <ChevronLeft size={16} /> Anterior
                   </button>
                   <button
-                    onClick={() => runSearch(activeQuery, pageSize, offset + pageSize)}
+                    onClick={() => runSearch(activeQuery, pageSize, offset + pageSize, domainParam)}
                     disabled={!hasNext || loading}
                     className="flex items-center gap-1 border rounded-lg px-3 py-1.5 text-sm hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
                   >

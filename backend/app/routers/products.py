@@ -24,10 +24,15 @@ async def search_products(
     q: str = Query(..., min_length=2, description="Termo de busca"),
     limit: int = Query(50, ge=1, le=200, description="Itens por página"),
     offset: int = Query(0, ge=0, description="Deslocamento para paginação"),
+    domain: str | None = Query(
+        None,
+        description="Filtra por domínio (domain_id) ou 'all' para não filtrar. "
+        "Se omitido, detecta automaticamente.",
+    ),
     client: MLClient = Depends(_require_ml_client),
 ):
     """Busca e analisa produtos no Mercado Livre (catálogo, paginado)."""
-    result = await search_and_analyze(client, q, limit=limit, offset=offset)
+    result = await search_and_analyze(client, q, limit=limit, offset=offset, domain=domain)
     await client.close()
     return result
 

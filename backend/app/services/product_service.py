@@ -19,6 +19,7 @@ async def search_and_analyze(
     query: str,
     limit: int = 50,
     offset: int = 0,
+    domain: str | None = None,
 ) -> dict:
     """
     Busca produtos no catálogo (paginado) e retorna análise enriquecida com
@@ -27,15 +28,36 @@ async def search_and_analyze(
     - Faixa de preço (min/máx/médio) do mercado pesquisado
     - Marcas mais comuns e nuvem de palavras-chave
     - Score de oportunidade (menos concorrência + margem de preço)
+
+    Para aproximar a relevância da busca pública, detecta a categoria/domínio
+    do termo (domain_discovery) e filtra a busca por ele. `domain` permite
+    sobrescrever: um domain_id específico, ou "all" para não filtrar.
     """
-    raw = await client.get(
-        "/products/search",
-        site_id=settings.ml_site_id,
-        status="active",
-        q=query,
-        limit=min(limit, 200),
-        offset=offset,
-    )
+    # Detecta os domínios candidatos do termo (igual à busca pública do ML)
+    domain_options = await _discover_domains(client, query)
+
+    if domain == "all":
+        domain_id: str | None = None
+    elif domain:
+        domain_id = domain
+    else:
+        domain_id = domain_options[0]["id"] if domain_options else None
+
+    active_domain = next((d for d in domain_options if d["id"] == domain_id), None)
+    if domain_id and not active_domain:
+        active_domain = {"id": domain_id, "name": None}
+
+    params: dict = {
+        "site_id": settings.ml_site_id,
+        "status": "active",
+        "q": query,
+        "limit": min(limit, 200),
+        "offset": offset,
+    }
+    if domain_id:
+        params["domain_id"] = domain_id
+
+    raw = await client.get("/products/search", **params)
     products = raw.get("results", [])
     paging = raw.get("paging", {})
 
@@ -48,6 +70,8 @@ async def search_and_analyze(
                 "analyzed": 0,
                 "limit": limit,
                 "offset": offset,
+                "active_domain": active_domain,
+                "domain_options": domain_options,
             },
         }
 
@@ -101,6 +125,8 @@ async def search_and_analyze(
         "analyzed": len(enriched),
         "limit": limit,
         "offset": offset,
+        "active_domain": active_domain,
+        "domain_options": domain_options,
         "price_min": min(all_prices) if all_prices else 0,
         "price_max": max(all_prices) if all_prices else 0,
         "price_avg": round(sum(all_prices) / len(all_prices), 2) if all_prices else 0,
@@ -112,6 +138,27 @@ async def search_and_analyze(
     }
 
     return {"query": query, "items": enriched, "summary": summary}
+
+
+async def _discover_domains(client: MLClient, query: str) -> list[dict]:
+    """Detecta as categorias/domínios prováveis de um termo (igual à busca pública).
+
+    Retorna lista deduplicada de {id, name}, do mais provável ao menos.
+    """
+    try:
+        data = await client.get(
+            f"/sites/{settings.ml_site_id}/domain_discovery/search", q=query, limit=8
+        )
+    except Exception:
+        return []
+    options: list[dict] = []
+    seen: set[str] = set()
+    for d in data if isinstance(data, list) else []:
+        did = d.get("domain_id")
+        if did and did not in seen:
+            seen.add(did)
+            options.append({"id": did, "name": d.get("domain_name")})
+    return options
 
 
 async def _get_offers(client: MLClient, product_id: str | None) -> list[dict]:
