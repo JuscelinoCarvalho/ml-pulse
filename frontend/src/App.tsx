@@ -91,6 +91,9 @@ function Layout({ children }: { children: React.ReactNode }) {
           </div>
         </nav>
         <div className="p-3 border-t border-white/10">
+          <p className="px-3 pb-2 text-[11px] text-gray-400">
+            Desenvolvido por <span className="text-ml-yellow font-semibold">Jussa</span>
+          </p>
           <button
             onClick={handleLogout}
             className="flex items-center gap-3 px-3 py-2.5 w-full rounded-lg text-sm text-gray-300 hover:bg-white/10 transition"

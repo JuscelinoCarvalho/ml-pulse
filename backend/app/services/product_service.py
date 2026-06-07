@@ -1,79 +1,155 @@
 """
 Serviço de Pesquisa e Análise de Produtos.
 Aplica lógica de negócio sobre os dados brutos da API ML.
+
+Usa o Buscador de Produtos (catálogo): GET /products/search — o endpoint
+/sites/MLB/search (busca de itens) está bloqueado (403) para esta aplicação.
+Cada produto do catálogo é enriquecido com suas ofertas reais via
+GET /products/{id}/items (preço, concorrência, frete).
 """
+import asyncio
 from typing import Any
 
+from app.config import settings
 from app.services.ml_client import MLClient
 
 
 async def search_and_analyze(
     client: MLClient,
     query: str,
-    category: str | None = None,
     limit: int = 50,
+    offset: int = 0,
 ) -> dict:
     """
-    Busca produtos e retorna análise enriquecida:
-    - Preço mínimo, máximo e médio
-    - Top vendedores
-    - Score de oportunidade por item
-    - Palavras-chave mais comuns nos títulos líderes
+    Busca produtos no catálogo (paginado) e retorna análise enriquecida com
+    ofertas reais:
+    - Menor preço e nº de concorrentes (ofertas) por produto
+    - Faixa de preço (min/máx/médio) do mercado pesquisado
+    - Marcas mais comuns e nuvem de palavras-chave
+    - Score de oportunidade (menos concorrência + margem de preço)
     """
-    raw = await client.search_products(query, category=category, limit=limit)
-    results = raw.get("results", [])
+    raw = await client.get(
+        "/products/search",
+        site_id=settings.ml_site_id,
+        status="active",
+        q=query,
+        limit=min(limit, 200),
+        offset=offset,
+    )
+    products = raw.get("results", [])
+    paging = raw.get("paging", {})
 
-    if not results:
-        return {"query": query, "total": 0, "items": [], "summary": {}}
+    if not products:
+        return {
+            "query": query,
+            "items": [],
+            "summary": {
+                "total_found": paging.get("total", 0),
+                "analyzed": 0,
+                "limit": limit,
+                "offset": offset,
+            },
+        }
 
-    prices = [r["price"] for r in results if r.get("price")]
-    sellers: dict[str, dict] = {}
+    # Enriquece cada produto com suas ofertas, com concorrência limitada.
+    sem = asyncio.Semaphore(15)
 
+    async def _enrich(product_id: str | None) -> list[dict]:
+        async with sem:
+            return await _get_offers(client, product_id)
+
+    offers_per_product = await asyncio.gather(
+        *[_enrich(p.get("id")) for p in products],
+        return_exceptions=True,
+    )
+
+    all_prices: list[float] = []
+    brand_counts: dict[str, int] = {}
     enriched = []
-    for item in results:
-        seller = item.get("seller", {})
-        seller_id = str(seller.get("id", ""))
 
-        if seller_id and seller_id not in sellers:
-            sellers[seller_id] = {
-                "id": seller_id,
-                "nickname": seller.get("nickname", ""),
-                "items": 0,
-                "total_sold": 0,
-            }
-        if seller_id:
-            sellers[seller_id]["items"] += 1
-            sellers[seller_id]["total_sold"] += item.get("sold_quantity", 0)
+    for product, offers in zip(products, offers_per_product):
+        if isinstance(offers, Exception):
+            offers = []
+        prices = [o["price"] for o in offers if o.get("price")]
+        all_prices.extend(prices)
+
+        brand = _attr(product, "BRAND")
+        if brand:
+            brand_counts[brand] = brand_counts.get(brand, 0) + 1
+
+        pics = product.get("pictures") or []
+        thumb = pics[0].get("url") if pics and isinstance(pics[0], dict) else ""
+        free = any((o.get("shipping") or {}).get("free_shipping") for o in offers)
 
         enriched.append({
-            "id": item.get("id"),
-            "title": item.get("title"),
-            "price": item.get("price"),
-            "currency": item.get("currency_id"),
-            "sold_quantity": item.get("sold_quantity", 0),
-            "condition": item.get("condition"),
-            "thumbnail": item.get("thumbnail"),
-            "permalink": item.get("permalink"),
-            "seller_id": seller_id,
-            "seller_nickname": seller.get("nickname", ""),
-            "shipping_free": item.get("shipping", {}).get("free_shipping", False),
-            "opportunity_score": _opportunity_score(item),
+            "id": product.get("id"),
+            "title": product.get("name"),
+            "brand": brand,
+            "price": min(prices) if prices else 0,
+            "price_max": max(prices) if prices else 0,
+            "offers_count": len(offers),
+            "thumbnail": thumb,
+            "permalink": f"https://www.mercadolivre.com.br/p/{product.get('id')}",
+            "shipping_free": free,
+            "opportunity_score": _catalog_opportunity(len(offers), prices),
         })
 
-    # Ordena por opportunity_score
     enriched.sort(key=lambda x: x["opportunity_score"], reverse=True)
 
     summary = {
-        "total_found": raw.get("paging", {}).get("total", 0),
-        "returned": len(results),
-        "price_min": min(prices) if prices else 0,
-        "price_max": max(prices) if prices else 0,
-        "price_avg": round(sum(prices) / len(prices), 2) if prices else 0,
-        "top_sellers": sorted(sellers.values(), key=lambda s: s["total_sold"], reverse=True)[:5],
-        "keyword_cloud": _keyword_cloud([r["title"] for r in results[:20]]),
+        "total_found": paging.get("total", 0),
+        "analyzed": len(enriched),
+        "limit": limit,
+        "offset": offset,
+        "price_min": min(all_prices) if all_prices else 0,
+        "price_max": max(all_prices) if all_prices else 0,
+        "price_avg": round(sum(all_prices) / len(all_prices), 2) if all_prices else 0,
+        "top_brands": [
+            {"brand": b, "count": c}
+            for b, c in sorted(brand_counts.items(), key=lambda x: -x[1])[:8]
+        ],
+        "keyword_cloud": _keyword_cloud([p.get("name", "") for p in products]),
     }
 
     return {"query": query, "items": enriched, "summary": summary}
+
+
+async def _get_offers(client: MLClient, product_id: str | None) -> list[dict]:
+    """Retorna as ofertas (listagens) de um produto de catálogo."""
+    if not product_id:
+        return []
+    data = await client.get(f"/products/{product_id}/items")
+    return data.get("results", [])
+
+
+def _attr(product: dict, attr_id: str) -> str | None:
+    for a in product.get("attributes", []):
+        if a.get("id") == attr_id:
+            return a.get("value_name")
+    return None
+
+
+def _catalog_opportunity(offers_count: int, prices: list[float]) -> float:
+    """Score 0-100: menos concorrência + maior dispersão de preço = mais oportunidade."""
+    score = 0.0
+    # baixa concorrência (mas com mercado ativo) = mais oportunidade (até 50 pts).
+    # 0 ofertas normalmente é entrada "fantasma" do catálogo, sem mercado real.
+    if offers_count == 0:
+        score += 5
+    elif offers_count <= 3:
+        score += 50
+    elif offers_count <= 7:
+        score += 30
+    elif offers_count <= 15:
+        score += 15
+    # dispersão de preço entre vendedores = margem (até 30 pts)
+    if len(prices) > 1:
+        spread = (max(prices) - min(prices)) / max(prices)
+        score += min(spread * 60, 30)
+    # ticket (até 20 pts)
+    if prices:
+        score += min(min(prices) / 100, 20)
+    return round(min(score, 100), 1)
 
 
 async def get_item_detail(client: MLClient, item_id: str) -> dict:

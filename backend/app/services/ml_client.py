@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
+from cryptography.fernet import InvalidToken
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -193,11 +194,19 @@ async def get_system_token(db: AsyncSession) -> MLToken | None:
 
 
 async def get_shared_ml_client(db: AsyncSession) -> MLClient | None:
-    """Retorna MLClient usando o token do sistema (conta do owner), compartilhado por todos os usuários."""
+    """Retorna MLClient usando o token do sistema (conta do owner), compartilhado por todos os usuários.
+
+    Retorna None se o token não puder ser descriptografado (ex.: FERNET_KEY
+    rotacionada) — nesse caso é preciso reconectar a conta, e a API responde
+    503 em vez de 500.
+    """
     token_row = await get_system_token(db)
     if not token_row:
         return None
-    return await _client_from_token_row(token_row, db)
+    try:
+        return await _client_from_token_row(token_row, db)
+    except InvalidToken:
+        return None
 
 
 async def get_ml_client_for_user(user_id: int, db: AsyncSession) -> MLClient | None:

@@ -1,131 +1,30 @@
 import { useState } from "react";
 import { products } from "../api/client";
-import { Search, TrendingUp, ExternalLink, FlaskConical } from "lucide-react";
+import { Search, TrendingUp, ExternalLink, Tag, Users, ChevronLeft, ChevronRight } from "lucide-react";
 
 interface SearchResult {
   summary: {
     total_found: number;
+    analyzed: number;
     price_min: number;
     price_max: number;
     price_avg: number;
-    top_sellers: { nickname: string; total_sold: number }[];
+    top_brands: { brand: string; count: number }[];
     keyword_cloud: { word: string; count: number }[];
   };
   items: {
     id: string;
     title: string;
+    brand: string | null;
     price: number;
-    sold_quantity: number;
-    condition: string;
+    price_max: number;
+    offers_count: number;
     thumbnail: string;
     permalink: string;
-    seller_nickname: string;
     shipping_free: boolean;
     opportunity_score: number;
   }[];
 }
-
-const MOCK_RESULT: SearchResult = {
-  summary: {
-    total_found: 4821,
-    price_min: 29.9,
-    price_max: 899.0,
-    price_avg: 187.5,
-    top_sellers: [
-      { nickname: "TECH_IMPORTS_BR", total_sold: 12430 },
-      { nickname: "ELETRO_MEGA_STORE", total_sold: 9871 },
-      { nickname: "SOUND_SHOP_SP", total_sold: 7654 },
-      { nickname: "FONE_MANIA_RJ", total_sold: 5320 },
-      { nickname: "GADGETS_ONLINE", total_sold: 3210 },
-    ],
-    keyword_cloud: [
-      { word: "bluetooth", count: 18 },
-      { word: "fone", count: 17 },
-      { word: "sem fio", count: 14 },
-      { word: "cancelamento", count: 11 },
-      { word: "ruído", count: 10 },
-      { word: "headphone", count: 9 },
-      { word: "pro", count: 8 },
-      { word: "earbuds", count: 7 },
-      { word: "anc", count: 6 },
-      { word: "bass", count: 5 },
-    ],
-  },
-  items: [
-    {
-      id: "MLB1",
-      title: "Fone de Ouvido Bluetooth JBL Tune 520BT Sem Fio Pure Bass",
-      price: 249.9,
-      sold_quantity: 3420,
-      condition: "new",
-      thumbnail: "https://http2.mlstatic.com/D_NQ_NP_sample1.jpg",
-      permalink: "https://www.mercadolivre.com.br",
-      seller_nickname: "TECH_IMPORTS_BR",
-      shipping_free: true,
-      opportunity_score: 87.5,
-    },
-    {
-      id: "MLB2",
-      title: "Headphone Sony WH-1000XM5 Cancelamento de Ruído Ativo Premium",
-      price: 1499.0,
-      sold_quantity: 1876,
-      condition: "new",
-      thumbnail: "https://http2.mlstatic.com/D_NQ_NP_sample2.jpg",
-      permalink: "https://www.mercadolivre.com.br",
-      seller_nickname: "SOUND_SHOP_SP",
-      shipping_free: true,
-      opportunity_score: 82.0,
-    },
-    {
-      id: "MLB3",
-      title: "Fone Bluetooth Xiaomi Redmi Buds 4 Pro ANC TWS",
-      price: 189.9,
-      sold_quantity: 5210,
-      condition: "new",
-      thumbnail: "https://http2.mlstatic.com/D_NQ_NP_sample3.jpg",
-      permalink: "https://www.mercadolivre.com.br",
-      seller_nickname: "ELETRO_MEGA_STORE",
-      shipping_free: true,
-      opportunity_score: 79.3,
-    },
-    {
-      id: "MLB4",
-      title: "Earbuds Sem Fio TWS i12 Bluetooth 5.0 com Case Carregador",
-      price: 49.9,
-      sold_quantity: 9870,
-      condition: "new",
-      thumbnail: "https://http2.mlstatic.com/D_NQ_NP_sample4.jpg",
-      permalink: "https://www.mercadolivre.com.br",
-      seller_nickname: "GADGETS_ONLINE",
-      shipping_free: false,
-      opportunity_score: 72.1,
-    },
-    {
-      id: "MLB5",
-      title: "Fone Gamer HyperX Cloud III Headset Wired 7.1 Surround",
-      price: 599.0,
-      sold_quantity: 2140,
-      condition: "new",
-      thumbnail: "https://http2.mlstatic.com/D_NQ_NP_sample5.jpg",
-      permalink: "https://www.mercadolivre.com.br",
-      seller_nickname: "FONE_MANIA_RJ",
-      shipping_free: true,
-      opportunity_score: 68.4,
-    },
-    {
-      id: "MLB6",
-      title: "Fone de Ouvido Bluetooth Samsung Galaxy Buds2 Pro ANC",
-      price: 799.0,
-      sold_quantity: 1340,
-      condition: "new",
-      thumbnail: "https://http2.mlstatic.com/D_NQ_NP_sample6.jpg",
-      permalink: "https://www.mercadolivre.com.br",
-      seller_nickname: "TECH_IMPORTS_BR",
-      shipping_free: true,
-      opportunity_score: 61.0,
-    },
-  ],
-};
 
 const fmt = (v: number) =>
   v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -135,28 +34,77 @@ export default function Products() {
   const [result, setResult] = useState<SearchResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [isMock, setIsMock] = useState(false);
+  const [sortBy, setSortBy] = useState<"opportunity" | "price_asc" | "price_desc" | "title">("opportunity");
+  const [brandFilter, setBrandFilter] = useState<string | null>(null);
+  const [pageSize, setPageSize] = useState(50);
+  const [offset, setOffset] = useState(0);
+  const [activeQuery, setActiveQuery] = useState("");
 
-  const handleSearch = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!query.trim()) return;
+  const runSearch = async (q: string, lim: number, off: number) => {
+    if (!q.trim()) return;
     setLoading(true);
     setError("");
-    setIsMock(false);
+    setBrandFilter(null);
     try {
-      const { data } = await products.search(query);
+      const { data } = await products.search(q, lim, off);
       setResult(data);
-    } catch {
-      setResult(MOCK_RESULT);
-      setIsMock(true);
+      setActiveQuery(q);
+      setOffset(off);
+    } catch (err: any) {
+      setResult(null);
+      setError(
+        err.response?.data?.detail || "Erro ao buscar produtos. Tente novamente."
+      );
     } finally {
       setLoading(false);
     }
   };
 
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    runSearch(query, pageSize, 0);
+  };
+
+  const changePageSize = (n: number) => {
+    setPageSize(n);
+    runSearch(activeQuery || query, n, 0);
+  };
+
+  // Limite de offset da busca do ML (paginação profunda é restrita)
+  const MAX_OFFSET = 1000;
+  const total = result?.summary.total_found ?? 0;
+  const pageEnd = Math.min(offset + pageSize, total);
+  const hasPrev = offset > 0;
+  const hasNext = offset + pageSize < Math.min(total, MAX_OFFSET);
+
+  const displayedItems = (() => {
+    if (!result) return [];
+    let items = result.items;
+    if (brandFilter) items = items.filter((i) => i.brand === brandFilter);
+    const sorted = [...items];
+    sorted.sort((a, b) => {
+      switch (sortBy) {
+        case "price_asc":
+          return (a.price || Infinity) - (b.price || Infinity); // sem oferta vai pro fim
+        case "price_desc":
+          return b.price - a.price;
+        case "title":
+          return (a.title || "").localeCompare(b.title || "", "pt-BR");
+        default:
+          return b.opportunity_score - a.opportunity_score;
+      }
+    });
+    return sorted;
+  })();
+
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
-      <h1 className="text-2xl font-bold text-gray-900">Pesquisa de Produtos</h1>
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">Pesquisa de Produtos</h1>
+        <p className="text-gray-500 text-sm">
+          Busca no catálogo do Mercado Livre com preço e concorrência reais
+        </p>
+      </div>
 
       <form onSubmit={handleSearch} className="flex gap-3">
         <input
@@ -175,18 +123,23 @@ export default function Products() {
         </button>
       </form>
 
-      {isMock && (
-        <div className="flex items-center gap-2 bg-yellow-50 border border-yellow-200 rounded-xl px-4 py-3 text-sm text-yellow-800">
-          <FlaskConical size={16} className="flex-shrink-0" />
-          Exibindo dados de demonstração — API em homologação no Mercado Livre.
+      {loading && (
+        <div className="p-8 text-center text-gray-500">
+          Analisando catálogo e ofertas...
         </div>
       )}
 
-      {result && (
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700">
+          {error}
+        </div>
+      )}
+
+      {result && !loading && (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {[
-              { label: "Encontrados", value: result.summary.total_found.toLocaleString() },
+              { label: "Encontrados", value: result.summary.total_found.toLocaleString("pt-BR") },
               { label: "Preço Mín.", value: fmt(result.summary.price_min) },
               { label: "Preço Máx.", value: fmt(result.summary.price_max) },
               { label: "Preço Médio", value: fmt(result.summary.price_avg) },
@@ -200,8 +153,30 @@ export default function Products() {
 
           <div className="grid md:grid-cols-3 gap-6">
             <div className="md:col-span-2 space-y-3">
-              <h2 className="font-semibold text-gray-800">Produtos ({result.items.length})</h2>
-              {result.items.map((item) => (
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <h2 className="font-semibold text-gray-800">
+                  Produtos ({displayedItems.length})
+                  {brandFilter && (
+                    <button
+                      onClick={() => setBrandFilter(null)}
+                      className="ml-2 text-xs font-normal text-ml-blue underline"
+                    >
+                      {brandFilter} ✕
+                    </button>
+                  )}
+                </h2>
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+                  className="border rounded-lg px-3 py-1.5 text-sm"
+                >
+                  <option value="opportunity">Maior oportunidade</option>
+                  <option value="price_asc">Menor preço</option>
+                  <option value="price_desc">Maior preço</option>
+                  <option value="title">Título (A-Z)</option>
+                </select>
+              </div>
+              {displayedItems.map((item) => (
                 <div key={item.id} className="bg-white rounded-xl p-4 shadow-sm border flex gap-4 items-start">
                   <img
                     src={item.thumbnail}
@@ -211,15 +186,34 @@ export default function Products() {
                   />
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-gray-900 text-sm line-clamp-2">{item.title}</p>
-                    <p className="text-lg font-bold text-ml-blue mt-1">{fmt(item.price)}</p>
-                    <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
-                      <span>{item.sold_quantity.toLocaleString()} vendidos</span>
-                      {item.shipping_free && <span className="text-green-600 font-medium">Frete grátis</span>}
-                      <span>{item.seller_nickname}</span>
+                    {item.offers_count > 0 ? (
+                      <p className="text-lg font-bold text-ml-blue mt-1">
+                        {fmt(item.price)}
+                        {item.price_max > item.price && (
+                          <span className="text-xs font-normal text-gray-400">
+                            {" "}– {fmt(item.price_max)}
+                          </span>
+                        )}
+                      </p>
+                    ) : (
+                      <p className="text-sm text-gray-400 mt-1">Sem ofertas ativas</p>
+                    )}
+                    <div className="flex items-center flex-wrap gap-3 mt-1 text-xs text-gray-500">
+                      {item.brand && (
+                        <span className="flex items-center gap-1">
+                          <Tag size={12} /> {item.brand}
+                        </span>
+                      )}
+                      <span className="flex items-center gap-1">
+                        <Users size={12} /> {item.offers_count} {item.offers_count === 1 ? "vendedor" : "vendedores"}
+                      </span>
+                      {item.shipping_free && (
+                        <span className="text-green-600 font-medium">Frete grátis</span>
+                      )}
                     </div>
                   </div>
                   <div className="flex flex-col items-end gap-2 flex-shrink-0">
-                    <div className="flex items-center gap-1 bg-yellow-50 px-2 py-1 rounded-lg">
+                    <div className="flex items-center gap-1 bg-yellow-50 px-2 py-1 rounded-lg" title="Score de oportunidade">
                       <TrendingUp size={12} className="text-yellow-600" />
                       <span className="text-xs font-bold text-yellow-700">{item.opportunity_score}</span>
                     </div>
@@ -229,16 +223,70 @@ export default function Products() {
                   </div>
                 </div>
               ))}
+
+              {/* Paginação */}
+              <div className="flex items-center justify-between flex-wrap gap-3 pt-2">
+                <div className="flex items-center gap-2 text-sm text-gray-500">
+                  <span>
+                    {total > 0 ? `${offset + 1}–${pageEnd} de ${total.toLocaleString("pt-BR")}` : "—"}
+                  </span>
+                  <select
+                    value={pageSize}
+                    onChange={(e) => changePageSize(Number(e.target.value))}
+                    className="border rounded-lg px-2 py-1 text-sm"
+                  >
+                    <option value={50}>50 / pág.</option>
+                    <option value={100}>100 / pág.</option>
+                    <option value={200}>200 / pág.</option>
+                  </select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => runSearch(activeQuery, pageSize, Math.max(0, offset - pageSize))}
+                    disabled={!hasPrev || loading}
+                    className="flex items-center gap-1 border rounded-lg px-3 py-1.5 text-sm hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <ChevronLeft size={16} /> Anterior
+                  </button>
+                  <button
+                    onClick={() => runSearch(activeQuery, pageSize, offset + pageSize)}
+                    disabled={!hasNext || loading}
+                    className="flex items-center gap-1 border rounded-lg px-3 py-1.5 text-sm hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    Próxima <ChevronRight size={16} />
+                  </button>
+                </div>
+              </div>
             </div>
 
             <div className="space-y-4">
               <div className="bg-white rounded-xl p-5 shadow-sm border">
-                <h3 className="font-semibold text-gray-800 mb-3">Top Vendedores</h3>
-                {result.summary.top_sellers.map((s, i) => (
-                  <div key={i} className="flex justify-between text-sm py-1 border-b last:border-0">
-                    <span className="text-gray-700">{s.nickname}</span>
-                    <span className="font-semibold">{s.total_sold.toLocaleString()}</span>
-                  </div>
+                <h3 className="font-semibold text-gray-800 mb-3">Top Marcas</h3>
+                {result.summary.top_brands.length === 0 && (
+                  <p className="text-xs text-gray-400">Sem dados de marca.</p>
+                )}
+                {result.summary.top_brands.length > 0 && (
+                  <button
+                    onClick={() => setBrandFilter(null)}
+                    className={`w-full flex justify-between text-sm py-1 border-b transition ${
+                      brandFilter === null ? "text-ml-blue font-semibold" : "text-gray-700 hover:text-ml-blue"
+                    }`}
+                  >
+                    <span>Todas as marcas</span>
+                    <span>{result.summary.analyzed}</span>
+                  </button>
+                )}
+                {result.summary.top_brands.map((b, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setBrandFilter(b.brand)}
+                    className={`w-full flex justify-between text-sm py-1 border-b last:border-0 transition ${
+                      brandFilter === b.brand ? "text-ml-blue font-semibold" : "text-gray-700 hover:text-ml-blue"
+                    }`}
+                  >
+                    <span className="truncate text-left">{b.brand}</span>
+                    <span className="font-semibold">{b.count}</span>
+                  </button>
                 ))}
               </div>
 

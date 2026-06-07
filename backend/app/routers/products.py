@@ -22,12 +22,12 @@ async def _require_ml_client(
 @router.get("/search")
 async def search_products(
     q: str = Query(..., min_length=2, description="Termo de busca"),
-    category: str | None = Query(None, description="ID de categoria ML"),
-    limit: int = Query(50, ge=1, le=50),
+    limit: int = Query(50, ge=1, le=200, description="Itens por página"),
+    offset: int = Query(0, ge=0, description="Deslocamento para paginação"),
     client: MLClient = Depends(_require_ml_client),
 ):
-    """Busca e analisa produtos no Mercado Livre."""
-    result = await search_and_analyze(client, q, category=category, limit=limit)
+    """Busca e analisa produtos no Mercado Livre (catálogo, paginado)."""
+    result = await search_and_analyze(client, q, limit=limit, offset=offset)
     await client.close()
     return result
 
